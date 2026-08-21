@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mass DM Bot</title>
+  <style>
+    :root {
+      --bg: #0f0f13;
+      --card: #1a1a22;
+      --border: #2a2a35;
+      --text: #e8e8ed;
+      --muted: #8b8b9a;
+      --accent: #1d9bf0;
+      --accent-hover: #1a8cd8;
+      --success: #00ba7c;
+      --danger: #f4212e;
+      --warn: #ffad1f;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    .container { max-width: 920px; margin: 0 auto; }
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+      letter-spacing: -0.02em;
+    }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 28px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card h2 span { font-size: 0.8rem; color: var(--muted); font-weight: 400; }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    input, textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, textarea:focus { border-color: var(--accent); }
+    textarea { min-height: 90px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .field { margin-bottom: 14px; }
+    .field:last-child { margin-bottom: 0; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 18px;
+      border-radius: 999px;
+      border: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #d41c28; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,0.05); }
+    .btn-sm { padding: 7px 14px; font-size: 0.82rem; }
+    .account-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .account-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .account-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .account-header strong { font-size: 0.95rem; }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 6px;
+    }
+    .status-dot.active { background: var(--success); }
+    .status-dot.inactive { background: var(--muted); }
+    .status-text { font-size: 0.8rem; color: var(--muted); }
+    .status-text.has-pin { color: var(--success); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+    .log-box {
+      background: #0a0a0e;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      height: 280px;
+      overflow-y: auto;
+      padding: 12px;
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.55;
+    }
+    .log-entry { margin-bottom: 4px; word-break: break-word; }
+    .log-entry .ts { color: var(--muted); margin-right: 8px; }
+    .log-entry.info { color: #8ec8f5; }
+    .log-entry.success, .log-entry.done { color: var(--success); }
+    .log-entry.warn, .log-entry.delay { color: var(--warn); }
+    .log-entry.fail, .log-entry.error { color: var(--danger); }
+    .log-entry.start { color: #c084fc; }
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .running-badge {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      color: var(--success);
+      font-weight: 500;
+    }
+    .running-badge.on { display: inline-flex; }
+    .pulse {
+      width: 8px; height: 8px;
+      background: var(--success);
+      border-radius: 50%;
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+    .hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    @media (max-width: 640px) {
+      .row, .row-3 { grid-template-columns: 1fr; }
+      body { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Mass DM Bot</h1>
+    <p class="subtitle">Paste auth_token + ct0 + optional chat PIN for each account</p>
+
+    <!-- ACCOUNTS -->
+    <div class="card">
+      <h2>Accounts <span>up to 3</span></h2>
+      <div class="account-grid" id="accounts">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <!-- MESSAGE + SETTINGS -->
+    <div class="card">
+      <h2>Message & Settings</h2>
+      <div class="field">
+        <label>Message to send</label>
+        <textarea id="message" placeholder="Hey, just wanted to reach out..."></textarea>
+      </div>
+      <div class="row-3" style="margin-top:14px">
+        <div class="field">
+          <label>Daily limit per account</label>
+          <input type="number" id="dailyLimit" value="40" min="1" max="200" />
+        </div>
+        <div class="field">
+          <label>Delay between DMs (seconds)</label>
+          <input type="number" id="delaySeconds" value="55" min="20" max="300" />
+        </div>
+        <div class="field">
+          <label>Global fallback PIN (optional)</label>
+          <input type="text" id="globalPin" placeholder="only if account has no own PIN" autocomplete="off" />
+        </div>
+      </div>
+      <p class="hint">Per-account PIN (set above) is preferred. Global PIN is only used if an account has none saved.</p>
+    </div>
+
+    <!-- TARGETS -->
+    <div class="card">
+      <h2>Targets <span>one username per line</span></h2>
+      <div class="field">
+        <textarea id="targets" placeholder="elonmusk&#10;username2&#10;username3" style="min-height:110px"></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost btn-sm" onclick="saveTargets()">Save targets</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadTargets()">Reload</button>
+      </div>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="card">
+      <h2>Control</h2>
+      <div class="controls">
+        <button class="btn btn-primary" id="startBtn" onclick="startBot()">Start Mass DM</button>
+        <button class="btn btn-danger" id="stopBtn" onclick="stopBot()" disabled>Stop</button>
+        <span class="running-badge" id="runningBadge">
+          <span class="pulse"></span> Running
+        </span>
+      </div>
+    </div>
+
+    <!-- LOG -->
+    <div class="card">
+      <h2>Live Log</h2>
+      <div class="log-box" id="log"></div>
+    </div>
+  </div>
+
+  <script>
+    const ACCOUNT_COUNT = 3;
+    let ws = null;
+
+    function el(id) { return document.getElementById(id); }
+
+    function buildAccounts() {
+      const container = el('accounts');
+      container.innerHTML = '';
+      for (let i = 1; i <= ACCOUNT_COUNT; i++) {
+        const box = document.createElement('div');
+        box.className = 'account-box';
+        box.innerHTML = `
+          <div class="account-header">
+            <strong>Account ${i}</strong>
+            <span class="status-text" id="status${i}">
+              <span class="status-dot inactive"></span> Not saved
+            </span>
+          </div>
+          <div class="field">
+            <label>auth_token</label>
+            <input type="text" id="auth${i}" placeholder="paste auth_token cookie value" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>ct0</label>
+            <input type="text" id="ct0${i}" placeholder="paste ct0 cookie value" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>Chat PIN / Passcode (optional)</label>
+            <input type="text" id="pin${i}" placeholder="4-digit or longer PIN if the account has one" autocomplete="off" />
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary btn-sm" onclick="saveAccount(${i})">Save Account ${i}</button>
+          </div>
+        `;
+        container.appendChild(box);
+      }
+    }
+
+    async function refreshStatus() {
+      for (let i = 1; i <= ACCOUNT_COUNT; i++) {
+        try {
+          const res = await fetch(`/api/session/${i}/status`);
+          const data = await res.json();
+          const statusEl = el(`status${i}`);
+          if (data.active) {
+            const pinText = data.hasPin ? ' · PIN saved' : '';
+            statusEl.innerHTML = `<span class="status-dot active"></span><span class="${data.hasPin ? 'has-pin' : ''}">Saved${pinText}</span>`;
+          } else {
+            statusEl.innerHTML = `<span class="status-dot inactive"></span> Not saved`;
+          }
+        } catch {}
+      }
+    }
+
+    async function saveAccount(id) {
+      const authToken = el(`auth${id}`).value.trim();
+      const ct0 = el(`ct0${id}`).value.trim();
+      const passcode = el(`pin${id}`).value.trim();
+
+      if (!authToken) {
+        addLog('error', `Account ${id}: auth_token is required`);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/session/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ authToken, ct0, passcode })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          addLog('success', `Account ${id} saved${passcode ? ' (with PIN)' : ''}`);
+          // clear sensitive fields after save
+          el(`auth${id}`).value = '';
+          el(`ct0${id}`).value = '';
+          el(`pin${id}`).value = '';
+          refreshStatus();
+        } else {
+          addLog('error', data.error || 'Save failed');
+        }
+      } catch (e) {
+        addLog('error', `Save failed: ${e.message}`);
+      }
+    }
+
+    async function loadTargets() {
+      try {
+        const res = await fetch('/api/targets');
+        const data = await res.json();
+        el('targets').value = data.content || '';
+      } catch {}
+    }
+
+    async function saveTargets() {
+      try {
+        await fetch('/api/targets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: el('targets').value })
+        });
+        addLog('success', 'Targets saved');
+      } catch (e) {
+        addLog('error', `Failed to save targets: ${e.message}`);
+      }
+    }
+
+    function addLog(type, msg) {
+      const box = el('log');
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = `log-entry ${type}`;
+      div.innerHTML = `<span class="ts">${time}</span>${msg}`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function setRunning(on) {
+      el('startBtn').disabled = on;
+      el('stopBtn').disabled = !on;
+      el('runningBadge').classList.toggle('on', on);
+    }
+
+    async function startBot() {
+      const message = el('message').value.trim();
+      if (!message) {
+        addLog('error', 'Message is empty');
+        return;
+      }
+
+      await saveTargets();
+
+      const body = {
+        message,
+        dailyLimit: parseInt(el('dailyLimit').value, 10) || 40,
+        delaySeconds: parseInt(el('delaySeconds').value, 10) || 55,
+        passcode: el('globalPin').value.trim()
+      };
+
+      try {
+        const res = await fetch('/api/mass-dm/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setRunning(true);
+          addLog('start', `Started with ${data.accounts} account(s)`);
+        } else {
+          addLog('error', data.error || 'Start failed');
+        }
+      } catch (e) {
+        addLog('error', `Start failed: ${e.message}`);
+      }
+    }
+
+    async function stopBot() {
+      try {
+        await fetch('/api/mass-dm/stop', { method: 'POST' });
+        addLog('info', 'Stop requested');
+      } catch (e) {
+        addLog('error', `Stop failed: ${e.message}`);
+      }
+    }
+
+    function connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}`);
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'log') {
+            const t = msg.data.type || 'info';
+            addLog(t, msg.data.msg);
+          } else if (msg.type === 'status') {
+            setRunning(!!msg.data.running);
+          } else if (msg.type === 'connected') {
+            addLog('info', 'Connected to server');
+          }
+        } catch {}
+      };
+      ws.onclose = () => {
+        addLog('warn', 'Disconnected — reconnecting in 2s...');
+        setTimeout(connectWS, 2000);
+      };
+    }
+
+    // init
+    buildAccounts();
+    refreshStatus();
+    loadTargets();
+    connectWS();
+  </script>
+</body>
+</html>
