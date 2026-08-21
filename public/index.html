@@ -6,9 +6,9 @@
   <title>Mass DM Bot</title>
   <style>
     :root {
-      --bg: #0f0f13;
-      --card: #1a1a22;
-      --border: #2a2a35;
+      --bg: #0b0b0f;
+      --card: #14141a;
+      --border: #26262f;
       --text: #e8e8ed;
       --muted: #8b8b9a;
       --accent: #1d9bf0;
@@ -26,42 +26,42 @@
       padding: 24px;
       line-height: 1.5;
     }
-    .container { max-width: 920px; margin: 0 auto; }
+    .container { max-width: 980px; margin: 0 auto; }
     h1 {
-      font-size: 1.6rem;
+      font-size: 1.7rem;
       font-weight: 700;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       letter-spacing: -0.02em;
     }
-    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 28px; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 26px; }
     .card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 14px;
       padding: 20px;
-      margin-bottom: 20px;
+      margin-bottom: 18px;
     }
     .card h2 {
-      font-size: 1rem;
+      font-size: 0.95rem;
       font-weight: 600;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    .card h2 span { font-size: 0.8rem; color: var(--muted); font-weight: 400; }
+    .card h2 span { font-size: 0.78rem; color: var(--muted); font-weight: 400; }
     label {
       display: block;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       color: var(--muted);
       margin-bottom: 6px;
       font-weight: 500;
     }
     input, textarea {
       width: 100%;
-      background: var(--bg);
+      background: #0c0c10;
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 9px;
       padding: 10px 12px;
       color: var(--text);
       font-size: 0.9rem;
@@ -106,9 +106,9 @@
       gap: 16px;
     }
     .account-box {
-      background: var(--bg);
+      background: #0c0c10;
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 12px;
       padding: 16px;
     }
     .account-header {
@@ -130,10 +130,21 @@
     .status-text.has-pin { color: var(--success); }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
     .log-box {
-      background: #0a0a0e;
+      background: #08080c;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      height: 280px;
+      border-radius: 10px;
+      height: 300px;
+      overflow-y: auto;
+      padding: 12px;
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.55;
+    }
+    .log-box {
+      background: #08080c;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      height: 300px;
       overflow-y: auto;
       padding: 12px;
       font-family: "SF Mono", "Fira Code", Consolas, monospace;
@@ -177,6 +188,25 @@
       color: var(--muted);
       margin-top: 6px;
     }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .tab {
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: transparent;
+    }
+    .tab.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
     @media (max-width: 640px) {
       .row, .row-3 { grid-template-columns: 1fr; }
       body { padding: 16px; }
@@ -186,14 +216,12 @@
 <body>
   <div class="container">
     <h1>Mass DM Bot</h1>
-    <p class="subtitle">Paste auth_token + ct0 + optional chat PIN for each account</p>
+    <p class="subtitle">Hardened version • Better cookies • Proxy support • Stronger success checks</p>
 
     <!-- ACCOUNTS -->
     <div class="card">
       <h2>Accounts <span>up to 3</span></h2>
-      <div class="account-grid" id="accounts">
-        <!-- filled by JS -->
-      </div>
+      <div class="account-grid" id="accounts"></div>
     </div>
 
     <!-- MESSAGE + SETTINGS -->
@@ -203,6 +231,7 @@
         <label>Message to send</label>
         <textarea id="message" placeholder="Hey, just wanted to reach out..."></textarea>
       </div>
+
       <div class="row-3" style="margin-top:14px">
         <div class="field">
           <label>Daily limit per account</label>
@@ -217,7 +246,12 @@
           <input type="text" id="globalPin" placeholder="only if account has no own PIN" autocomplete="off" />
         </div>
       </div>
-      <p class="hint">Per-account PIN (set above) is preferred. Global PIN is only used if an account has none saved.</p>
+
+      <div class="field" style="margin-top:14px">
+        <label>Proxy (optional)</label>
+        <input type="text" id="proxy" placeholder="http://user:pass@ip:port  or  http://ip:port" autocomplete="off" />
+        <p class="hint">Leave empty for no proxy. Recommended if you run many accounts.</p>
+      </div>
     </div>
 
     <!-- TARGETS -->
@@ -260,6 +294,7 @@
     function buildAccounts() {
       const container = el('accounts');
       container.innerHTML = '';
+
       for (let i = 1; i <= ACCOUNT_COUNT; i++) {
         const box = document.createElement('div');
         box.className = 'account-box';
@@ -270,23 +305,59 @@
               <span class="status-dot inactive"></span> Not saved
             </span>
           </div>
-          <div class="field">
-            <label>auth_token</label>
-            <input type="text" id="auth${i}" placeholder="paste auth_token cookie value" autocomplete="off" />
+
+          <div class="tabs" id="tabs${i}">
+            <button class="tab active" onclick="switchTab(${i}, 'basic')">Basic</button>
+            <button class="tab" onclick="switchTab(${i}, 'full')">Full Cookies JSON</button>
           </div>
-          <div class="field">
-            <label>ct0</label>
-            <input type="text" id="ct0${i}" placeholder="paste ct0 cookie value" autocomplete="off" />
+
+          <div id="basic${i}">
+            <div class="field">
+              <label>auth_token</label>
+              <input type="text" id="auth${i}" placeholder="paste auth_token cookie value" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label>ct0</label>
+              <input type="text" id="ct0${i}" placeholder="paste ct0 cookie value" autocomplete="off" />
+            </div>
           </div>
+
+          <div id="full${i}" style="display:none">
+            <div class="field">
+              <label>Full Cookies JSON array</label>
+              <textarea id="cookies${i}" placeholder='[{"name":"auth_token","value":"...","domain":".x.com", ...}]' style="min-height:110px"></textarea>
+              <p class="hint">Paste the full cookies array exported from your browser for best stability.</p>
+            </div>
+          </div>
+
           <div class="field">
             <label>Chat PIN / Passcode (optional)</label>
             <input type="text" id="pin${i}" placeholder="4-digit or longer PIN if the account has one" autocomplete="off" />
           </div>
+
           <div class="actions">
             <button class="btn btn-primary btn-sm" onclick="saveAccount(${i})">Save Account ${i}</button>
           </div>
         `;
         container.appendChild(box);
+      }
+    }
+
+    function switchTab(id, mode) {
+      const basic = el(`basic${id}`);
+      const full = el(`full${id}`);
+      const tabs = el(`tabs${id}`).querySelectorAll('.tab');
+
+      tabs.forEach(t => t.classList.remove('active'));
+
+      if (mode === 'basic') {
+        basic.style.display = 'block';
+        full.style.display = 'none';
+        tabs[0].classList.add('active');
+      } else {
+        basic.style.display = 'none';
+        full.style.display = 'block';
+        tabs[1].classList.add('active');
       }
     }
 
@@ -310,25 +381,44 @@
       const authToken = el(`auth${id}`).value.trim();
       const ct0 = el(`ct0${id}`).value.trim();
       const passcode = el(`pin${id}`).value.trim();
+      const cookiesRaw = el(`cookies${id}`).value.trim();
 
-      if (!authToken) {
-        addLog('error', `Account ${id}: auth_token is required`);
-        return;
+      let body = { passcode };
+
+      if (cookiesRaw) {
+        try {
+          const parsed = JSON.parse(cookiesRaw);
+          if (!Array.isArray(parsed)) {
+            addLog('error', `Account ${id}: cookies must be a JSON array`);
+            return;
+          }
+          body.cookies = parsed;
+        } catch (e) {
+          addLog('error', `Account ${id}: invalid cookies JSON`);
+          return;
+        }
+      } else {
+        if (!authToken) {
+          addLog('error', `Account ${id}: auth_token is required (or use Full Cookies)`);
+          return;
+        }
+        body.authToken = authToken;
+        body.ct0 = ct0;
       }
 
       try {
         const res = await fetch(`/api/session/${id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ authToken, ct0, passcode })
+          body: JSON.stringify(body)
         });
         const data = await res.json();
         if (data.ok) {
           addLog('success', `Account ${id} saved${passcode ? ' (with PIN)' : ''}`);
-          // clear sensitive fields after save
           el(`auth${id}`).value = '';
           el(`ct0${id}`).value = '';
           el(`pin${id}`).value = '';
+          el(`cookies${id}`).value = '';
           refreshStatus();
         } else {
           addLog('error', data.error || 'Save failed');
@@ -388,7 +478,8 @@
         message,
         dailyLimit: parseInt(el('dailyLimit').value, 10) || 40,
         delaySeconds: parseInt(el('delaySeconds').value, 10) || 55,
-        passcode: el('globalPin').value.trim()
+        passcode: el('globalPin').value.trim(),
+        proxy: el('proxy').value.trim() || null
       };
 
       try {
@@ -399,10 +490,10 @@
         });
         const data = await res.json();
         if (data.ok) {
-          setRunning(true);
           addLog('start', `Started with ${data.accounts} account(s)`);
+          setRunning(true);
         } else {
-          addLog('error', data.error || 'Start failed');
+          addLog('error', data.error || 'Failed to start');
         }
       } catch (e) {
         addLog('error', `Start failed: ${e.message}`);
@@ -412,7 +503,8 @@
     async function stopBot() {
       try {
         await fetch('/api/mass-dm/stop', { method: 'POST' });
-        addLog('info', 'Stop requested');
+        addLog('warn', 'Stop requested');
+        setRunning(false);
       } catch (e) {
         addLog('error', `Stop failed: ${e.message}`);
       }
@@ -421,26 +513,25 @@
     function connectWS() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}`);
-      ws.onmessage = (ev) => {
+
+      ws.onmessage = (event) => {
         try {
-          const msg = JSON.parse(ev.data);
+          const msg = JSON.parse(event.data);
           if (msg.type === 'log') {
-            const t = msg.data.type || 'info';
-            addLog(t, msg.data.msg);
-          } else if (msg.type === 'status') {
+            addLog(msg.data.type || 'info', msg.data.msg);
+          }
+          if (msg.type === 'status') {
             setRunning(!!msg.data.running);
-          } else if (msg.type === 'connected') {
-            addLog('info', 'Connected to server');
           }
         } catch {}
       };
+
       ws.onclose = () => {
-        addLog('warn', 'Disconnected — reconnecting in 2s...');
         setTimeout(connectWS, 2000);
       };
     }
 
-    // init
+    // Init
     buildAccounts();
     refreshStatus();
     loadTargets();
