@@ -9,13 +9,12 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 ['session', 'public/debug'].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
-
 
 function broadcast(type, data) {
   const msg = JSON.stringify({ type, data, ts: Date.now() });
@@ -23,42 +22,50 @@ function broadcast(type, data) {
 }
 global.broadcast = broadcast;
 
-// Save session (auth_token + ct0) + optional per-account passcode
+// ─────────────────────────────────────────────
+// SAVE FULL COOKIES (important upgrade)
+// ─────────────────────────────────────────────
 app.post('/api/session/:id', (req, res) => {
-  const { authToken, ct0, passcode } = req.body;
-  if (!authToken || !String(authToken).trim()) {
-    return res.status(400).json({ error: 'auth_token required' });
-  }
+  const { authToken, ct0, passcode, cookies } = req.body;
 
   const file = path.join(__dirname, 'session', `account${req.params.id}.json`);
 
-  // Always save as a clean array (Playwright requires an array)
-  const cookies = [
-    {
-      name: 'auth_token',
-      value: String(authToken).trim(),
-      domain: '.x.com',
-      path: '/',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Lax'
+  // Prefer full cookies array if provided
+  if (Array.isArray(cookies) && cookies.length > 0) {
+    fs.writeFileSync(file, JSON.stringify(cookies, null, 2));
+  } else {
+    // Fallback to basic auth_token + ct0
+    if (!authToken || !String(authToken).trim()) {
+      return res.status(400).json({ error: 'auth_token or full cookies required' });
     }
-  ];
 
-  if (ct0 && String(ct0).trim()) {
-    cookies.push({
-      name: 'ct0',
-      value: String(ct0).trim(),
-      domain: '.x.com',
-      path: '/',
-      secure: true,
-      sameSite: 'Lax'
-    });
+    const basic = [
+      {
+        name: 'auth_token',
+        value: String(authToken).trim(),
+        domain: '.x.com',
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax'
+      }
+    ];
+
+    if (ct0 && String(ct0).trim()) {
+      basic.push({
+        name: 'ct0',
+        value: String(ct0).trim(),
+        domain: '.x.com',
+        path: '/',
+        secure: true,
+        sameSite: 'Lax'
+      });
+    }
+
+    fs.writeFileSync(file, JSON.stringify(basic, null, 2));
   }
 
-  fs.writeFileSync(file, JSON.stringify(cookies, null, 2));
-
-  // Store per-account passcode separately
+  // Passcode
   const pinFile = path.join(__dirname, 'session', `account${req.params.id}_pin.txt`);
   if (passcode && String(passcode).trim()) {
     fs.writeFileSync(pinFile, String(passcode).trim());
@@ -78,9 +85,18 @@ app.get('/api/session/:id/status', (req, res) => {
   });
 });
 
-// Start Mass DM
+// ─────────────────────────────────────────────
+// START MASS DM
+// ─────────────────────────────────────────────
 app.post('/api/mass-dm/start', (req, res) => {
-  const { message, dailyLimit = 50, delaySeconds = 45, passcode = '' } = req.body;
+  const {
+    message,
+    dailyLimit = 40,
+    delaySeconds = 55,
+    passcode = '',
+    proxy = null
+  } = req.body;
+
   if (!message) return res.status(400).json({ error: 'message required' });
 
   const accounts = [1, 2, 3]
@@ -103,7 +119,7 @@ app.post('/api/mass-dm/start', (req, res) => {
     return res.status(400).json({ error: 'No accounts found. Add session first.' });
   }
 
-  startMassDM(accounts, message, dailyLimit, delaySeconds, passcode)
+  startMassDM(accounts, message, dailyLimit, delaySeconds, passcode, proxy)
     .catch(err => console.error(err));
 
   res.json({ ok: true, accounts: accounts.length });
@@ -114,7 +130,7 @@ app.post('/api/mass-dm/stop', (req, res) => {
   res.json({ ok: true });
 });
 
-// Edit targets
+// Targets
 app.get('/api/targets', (req, res) => {
   const file = path.join(__dirname, 'users_to_dm.txt');
   res.json({ content: fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '' });
