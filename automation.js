@@ -66,77 +66,129 @@ function isPinPageContent(text = '') {
 
 async function handlePinPage(page, label, passcode) {
   if (!passcode || !String(passcode).trim()) {
-    log('warn', `[${label}] PIN/Challenge page detected but no passcode provided`);
+    log('warn', `[${label}] Challenge detected but no passcode provided`);
     return false;
   }
 
   const code = String(passcode).trim();
-  log('info', `[${label}] ⚠️ Challenge detected — attempting unlock`);
+  log('info', `[${label}] ⚠️ Challenge detected — trying careful unlock`);
 
-  for (let attempt = 1; attempt <= 6; attempt++) {
+  for (let attempt = 1; attempt <= 5; attempt++) {
     try {
-      await shot(page, `pin_${label}_try${attempt}`);
+      await shot(page, `challenge_${label}_try${attempt}`);
 
-      // Focus any visible input
-      const inputs = await page.$$('input:not([type="hidden"]), div[contenteditable="true"]');
-      let focused = false;
+      // Wait a bit for the challenge UI to fully load
+      await sleep(1500);
 
-      for (const el of inputs) {
-        if (await el.isVisible().catch(() => false)) {
-          await el.click({ clickCount: 3 }).catch(() => {});
-          await page.keyboard.press('Control+A').catch(() => {});
-          await page.keyboard.press('Backspace').catch(() => {});
-          focused = true;
+      // Try very specific challenge inputs first
+      const challengeSelectors = [
+        'input[name="text"]',
+        'input[type="text"]',
+        'input[inputmode="numeric"]',
+        'input[autocomplete="one-time-code"]',
+        'input[data-testid*="ocf"]',
+        'input[data-testid*="pin"]',
+        'input[data-testid*="challenge"]',
+        'input[placeholder*="code" i]',
+        'input[placeholder*="passcode" i]',
+        'input[aria-label*="code" i]',
+        'input[aria-label*="passcode" i]',
+        'input:not([type="hidden"])'
+      ];
+
+      let input = null;
+
+      for (const sel of challengeSelectors) {
+        const el = await page.$(sel);
+        if (el && await el.isVisible().catch(() => false)) {
+          // Make sure it's not the main tweet composer
+          const testId = (await el.getAttribute('data-testid').catch(() => '')) || '';
+          const aria = (await el.getAttribute('aria-label').catch(() => '')) || '';
+          if (
+            testId.toLowerCase().includes('tweet') ||
+            testId.toLowerCase().includes('composer') ||
+            aria.toLowerCase().includes('post') ||
+            aria.toLowerCase().includes('tweet')
+          ) {
+            continue; // skip main post box
+          }
+          input = el;
           break;
         }
       }
 
-      if (!focused) {
-        await page.mouse.click(640, 360).catch(() => {});
+      if (!input) {
+        // fallback: any visible input that is not the big composer
+        const allInputs = await page.$$('input:not([type="hidden"])');
+        for (const el of allInputs) {
+          if (await el.isVisible().catch(() => false)) {
+            const box = await el.boundingBox().catch(() => null);
+            if (box && box.height < 60) { // challenge inputs are usually small
+              input = el;
+              break;
+            }
+          }
+        }
       }
 
-      await sleep(400);
+      if (!input) {
+        log('warn', `[${label}] No challenge input found (attempt ${attempt})`);
+        await sleep(2000);
+        continue;
+      }
 
+      // Focus carefully
+      await input.click({ clickCount: 3 }).catch(() => {});
+      await sleep(300);
+      await page.keyboard.press('Control+A').catch(() => {});
+      await page.keyboard.press('Backspace').catch(() => {});
+      await sleep(200);
+
+      // Type slowly
       for (const char of code) {
-        await page.keyboard.type(char, { delay: 90 + Math.random() * 80 });
-        await sleep(40 + Math.random() * 60);
+        await page.keyboard.type(char, { delay: 120 + Math.random() * 80 });
+        await sleep(50 + Math.random() * 40);
       }
 
-      await sleep(600);
-      await page.keyboard.press('Enter').catch(() => {});
-      await sleep(1200);
+      await sleep(800);
 
-      // Click possible confirm buttons
-      const btns = await page.$$('div[role="button"], button');
-      for (const btn of btns) {
+      // Try Enter + possible buttons
+      await page.keyboard.press('Enter').catch(() => {});
+      await sleep(1000);
+
+      const buttons = await page.$$('div[role="button"], button');
+      for (const btn of buttons) {
         const txt = ((await btn.textContent().catch(() => '')) || '').toLowerCase();
         if (
           txt.includes('next') ||
-          txt.includes('confirm') ||
           txt.includes('verify') ||
+          txt.includes('confirm') ||
           txt.includes('continue') ||
           txt.includes('submit') ||
           txt.includes('unlock')
         ) {
           await btn.click({ force: true }).catch(() => {});
-          await sleep(1000);
+          await sleep(1200);
         }
       }
 
-      await sleep(4500);
+      // Wait for result
+      await sleep(5000);
 
       const pageText = (await page.textContent('body').catch(() => '')) || '';
-      if (!isPinUrl(page.url()) && !isPinPageContent(pageText)) {
+      const stillChallenge = isPinUrl(page.url()) || isPinPageContent(pageText);
+
+      if (!stillChallenge) {
         log('info', `[${label}] ✅ Challenge passed`);
         return true;
       }
 
       log('warn', `[${label}] Challenge still present (attempt ${attempt})`);
     } catch (e) {
-      log('warn', `[${label}] Challenge attempt ${attempt} failed: ${e.message.slice(0, 90)}`);
+      log('warn', `[${label}] Challenge attempt ${attempt} failed: ${e.message.slice(0, 100)}`);
     }
 
-    await sleep(1800);
+    await sleep(2000);
   }
 
   log('fail', `[${label}] All challenge attempts failed`);
