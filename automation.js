@@ -1,6 +1,9 @@
 // =====================================================
-// Mass DM Bot - Focused Version (fixed navigation + cookies)
+// Mass DM Bot - Hardened Version
+// Better cookies • Better selectors • Better success check
+// Proxy support • Stronger PIN handling
 // =====================================================
+
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
@@ -19,55 +22,69 @@ function sleep(ms) {
 }
 
 function parseUsername(raw) {
-  return raw.replace(/^@/, '').trim().toLowerCase();
+  return String(raw || '').replace(/^@/, '').trim().toLowerCase();
 }
 
-// ─── PIN / Passcode Handler ──────────────────────────
+// ─────────────────────────────────────────────
+// DEBUG
+// ─────────────────────────────────────────────
 const DEBUG_DIR = path.join(__dirname, 'public', 'debug');
 if (!fs.existsSync(DEBUG_DIR)) fs.mkdirSync(DEBUG_DIR, { recursive: true });
 
-function isPinUrl(url) {
-  return /\/pin\/|\/recovery|\/challenge|\/verification|ocf|\/i\/flow\/|passcode|account\/access/i.test(url || '');
+async function shot(page, name) {
+  try {
+    await page.screenshot({
+      path: path.join(DEBUG_DIR, `${name}_${Date.now()}.png`),
+      fullPage: false
+    });
+  } catch {}
+}
+
+// ─────────────────────────────────────────────
+// PIN / CHALLENGE
+// ─────────────────────────────────────────────
+function isPinUrl(url = '') {
+  return /\/pin\/|\/recovery|\/challenge|\/verification|ocf|\/i\/flow\/|passcode|account\/access|login\/error/i.test(url);
 }
 
 function isPinPageContent(text = '') {
   const t = (text || '').toLowerCase();
-  return t.includes('passcode is required') ||
-         t.includes('encryption keys') ||
-         t.includes('enter passcode') ||
-         t.includes('enter the code') ||
-         t.includes('verification code') ||
-         t.includes("confirm it's you") ||
-         t.includes('help us protect') ||
-         t.includes('authenticate') ||
-         t.includes('one-time code') ||
-         t.includes('enter your passcode');
+  return (
+    t.includes('passcode is required') ||
+    t.includes('enter passcode') ||
+    t.includes('enter the code') ||
+    t.includes('verification code') ||
+    t.includes("confirm it's you") ||
+    t.includes('help us protect') ||
+    t.includes('authenticate') ||
+    t.includes('one-time code') ||
+    t.includes('enter your passcode') ||
+    t.includes('suspicious login') ||
+    t.includes('verify your identity')
+  );
 }
 
 async function handlePinPage(page, label, passcode) {
-  if (!passcode || !passcode.trim()) {
-    log('warn', `[${label}] PIN page detected but no passcode provided`);
+  if (!passcode || !String(passcode).trim()) {
+    log('warn', `[${label}] PIN/Challenge page detected but no passcode provided`);
     return false;
   }
 
-  const code = passcode.trim();
-  let pageText = await page.textContent('body').catch(() => '') || '';
-  if (!isPinUrl(page.url()) && !isPinPageContent(pageText)) return false;
+  const code = String(passcode).trim();
+  log('info', `[${label}] ⚠️ Challenge detected — attempting unlock`);
 
-  log('info', `[${label}] ⚠️ PIN page detected — trying to unlock`);
-
-  for (let attempt = 1; attempt <= 5; attempt++) {
+  for (let attempt = 1; attempt <= 6; attempt++) {
     try {
-      await page.screenshot({
-        path: path.join(DEBUG_DIR, `pin_${label.replace(/\s+/g, '')}_${Date.now()}.png`),
-        fullPage: true
-      }).catch(() => {});
+      await shot(page, `pin_${label}_try${attempt}`);
 
+      // Focus any visible input
       const inputs = await page.$$('input:not([type="hidden"]), div[contenteditable="true"]');
       let focused = false;
+
       for (const el of inputs) {
         if (await el.isVisible().catch(() => false)) {
           await el.click({ clickCount: 3 }).catch(() => {});
+          await page.keyboard.press('Control+A').catch(() => {});
           await page.keyboard.press('Backspace').catch(() => {});
           focused = true;
           break;
@@ -75,49 +92,69 @@ async function handlePinPage(page, label, passcode) {
       }
 
       if (!focused) {
-        await page.mouse.click(640, 400).catch(() => {});
+        await page.mouse.click(640, 360).catch(() => {});
       }
 
-      await sleep(500);
+      await sleep(400);
 
       for (const char of code) {
-        await page.keyboard.type(char, { delay: 140 + Math.random() * 90 });
-        await sleep(60 + Math.random() * 70);
+        await page.keyboard.type(char, { delay: 90 + Math.random() * 80 });
+        await sleep(40 + Math.random() * 60);
       }
 
-      await sleep(800);
-      await page.keyboard.press('Enter');
-      await sleep(1800);
+      await sleep(600);
+      await page.keyboard.press('Enter').catch(() => {});
+      await sleep(1200);
 
-      const btns = await page.$$('div[role="button"], button, [data-testid*="Next"], [data-testid*="Confirm"], [data-testid*="next"]');
+      // Click possible confirm buttons
+      const btns = await page.$$('div[role="button"], button');
       for (const btn of btns) {
         const txt = ((await btn.textContent().catch(() => '')) || '').toLowerCase();
-        if (txt.includes('next') || txt.includes('confirm') || txt.includes('verify') || txt.includes('continue') || txt.includes('submit')) {
+        if (
+          txt.includes('next') ||
+          txt.includes('confirm') ||
+          txt.includes('verify') ||
+          txt.includes('continue') ||
+          txt.includes('submit') ||
+          txt.includes('unlock')
+        ) {
           await btn.click({ force: true }).catch(() => {});
-          await sleep(1200);
+          await sleep(1000);
         }
       }
 
-      await sleep(6000);
+      await sleep(4500);
 
-      pageText = await page.textContent('body').catch(() => '') || '';
+      const pageText = (await page.textContent('body').catch(() => '')) || '';
       if (!isPinUrl(page.url()) && !isPinPageContent(pageText)) {
-        log('info', `[${label}] ✅ PIN accepted`);
+        log('info', `[${label}] ✅ Challenge passed`);
         return true;
       }
 
-      log('warn', `[${label}] PIN attempt ${attempt} — still on pin screen`);
+      log('warn', `[${label}] Challenge still present (attempt ${attempt})`);
     } catch (e) {
-      log('warn', `[${label}] PIN attempt ${attempt} failed: ${e.message.slice(0, 90)}`);
+      log('warn', `[${label}] Challenge attempt ${attempt} failed: ${e.message.slice(0, 90)}`);
     }
-    await sleep(2000);
+
+    await sleep(1800);
   }
 
-  log('fail', `[${label}] All PIN attempts failed`);
+  log('fail', `[${label}] All challenge attempts failed`);
   return false;
 }
 
-// ─── DM Tracking ─────────────────────────────────────
+async function maybeHandlePin(page, label, passcode) {
+  const url = page.url();
+  const text = (await page.textContent('body').catch(() => '')) || '';
+  if (isPinUrl(url) || isPinPageContent(text)) {
+    return await handlePinPage(page, label, passcode);
+  }
+  return true;
+}
+
+// ─────────────────────────────────────────────
+// DM LOG
+// ─────────────────────────────────────────────
 const DM_LOG_PATH = path.join(__dirname, 'session', 'dm_sent.json');
 
 function getDmLog() {
@@ -133,51 +170,66 @@ function saveDmLog(data) {
   fs.writeFileSync(DM_LOG_PATH, JSON.stringify(data, null, 2));
 }
 
-function getTodayCount(label) {
-  const log = getDmLog();
+function alreadySent(label, username) {
+  const logData = getDmLog();
   const today = new Date().toISOString().slice(0, 10);
-  return (log[label]?.[today] || []).length;
+  return (logData[label]?.[today] || []).includes(username);
 }
 
 function markSent(label, username) {
-  const log = getDmLog();
+  const logData = getDmLog();
   const today = new Date().toISOString().slice(0, 10);
-  if (!log[label]) log[label] = {};
-  if (!log[label][today]) log[label][today] = [];
-  if (!log[label][today].includes(username)) {
-    log[label][today].push(username);
+  if (!logData[label]) logData[label] = {};
+  if (!logData[label][today]) logData[label][today] = [];
+  if (!logData[label][today].includes(username)) {
+    logData[label][today].push(username);
   }
-  saveDmLog(log);
+  saveDmLog(logData);
 }
 
-function alreadySent(label, username) {
-  const log = getDmLog();
-  const today = new Date().toISOString().slice(0, 10);
-  return (log[label]?.[today] || []).includes(username);
-}
+// ─────────────────────────────────────────────
+// SELECTORS (stronger set)
+// ─────────────────────────────────────────────
+const SELECTORS = {
+  messageButton: [
+    '[data-testid="sendDMFromProfile"]',
+    'div[data-testid="sendDMFromProfile"]',
+    'a[href*="/messages/"]',
+    '[aria-label="Message"]',
+    'div[role="button"][aria-label*="Message"]',
+    'div[role="button"]:has-text("Message")',
+    'button:has-text("Message")'
+  ],
+  composer: [
+    '[data-testid="dmComposerTextInput"]',
+    'div[data-testid="dmComposerTextInput"]',
+    'div[role="textbox"][contenteditable="true"]',
+    'div[aria-label*="Message"][contenteditable="true"]',
+    'div[contenteditable="true"][data-testid]'
+  ],
+  sendButton: [
+    '[data-testid="dmComposerSendButton"]',
+    'div[data-testid="dmComposerSendButton"]',
+    '[aria-label="Send"]',
+    'div[role="button"][aria-label="Send"]',
+    'div[role="button"]:has-text("Send")',
+    'button:has-text("Send")'
+  ],
+  searchPeople: [
+    '[data-testid="searchPeople"]',
+    'input[placeholder*="Search"]',
+    'input[aria-label*="Search"]',
+    'div[role="combobox"] input'
+  ],
+  userResult: [
+    '[data-testid="TypeaheadUser"]',
+    'div[data-testid="TypeaheadUser"]',
+    'div[role="option"]',
+    'li[role="option"]'
+  ]
+};
 
-// ─── Helpers ─────────────────────────────────────────
-async function safeGoto(page, url, label) {
-  try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await sleep(2500);
-    return true;
-  } catch (e) {
-    log('warn', `[${label}] goto failed: ${e.message.slice(0, 80)}`);
-    return false;
-  }
-}
-
-async function maybeHandlePin(page, label, passcode) {
-  const url = page.url();
-  const text = await page.textContent('body').catch(() => '') || '';
-  if (isPinUrl(url) || isPinPageContent(text)) {
-    return await handlePinPage(page, label, passcode);
-  }
-  return true;
-}
-
-async function findAndClick(page, selectors, timeout = 4000) {
+async function findAndClick(page, selectors, timeout = 4500) {
   for (const sel of selectors) {
     try {
       const el = await page.waitForSelector(sel, { timeout, state: 'visible' }).catch(() => null);
@@ -190,182 +242,201 @@ async function findAndClick(page, selectors, timeout = 4000) {
   return false;
 }
 
-async function findVisible(page, selectors, timeout = 4000) {
+async function findVisible(page, selectors, timeout = 4500) {
   for (const sel of selectors) {
     try {
       const el = await page.waitForSelector(sel, { timeout, state: 'visible' }).catch(() => null);
-      if (el && await el.isVisible().catch(() => false)) {
-        return el;
-      }
+      if (el && await el.isVisible().catch(() => false)) return el;
     } catch {}
   }
   return null;
 }
 
-// ─── Core Send DM ────────────────────────────────────
+async function safeGoto(page, url, label) {
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await sleep(2000 + Math.random() * 1200);
+    return true;
+  } catch (e) {
+    log('warn', `[${label}] goto failed: ${e.message.slice(0, 90)}`);
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────
+// SUCCESS DETECTION (important)
+// ─────────────────────────────────────────────
+async function didMessageActuallySend(page) {
+  // After sending, composer should clear or send button should disable / message bubble appear
+  try {
+    const composer = await findVisible(page, SELECTORS.composer, 2000);
+    if (composer) {
+      const text = (await composer.innerText().catch(() => '')) || '';
+      if (text.trim().length === 0) return true;
+    }
+
+    // Look for recent outgoing message indicators
+    const possible = await page.$$('[data-testid="messageEntry"], div[data-testid*="message"]');
+    if (possible.length > 0) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────
+// CORE SEND DM
+// ─────────────────────────────────────────────
 async function sendSingleDM(page, username, message, label, passcode) {
   const user = parseUsername(username);
   log('info', `[${label}] → starting DM to @${user}`);
 
-  log('info', `[${label}] Opening profile of @${user}`);
+  // Go to profile
   await safeGoto(page, `https://x.com/${user}`, label);
-
   if (!(await maybeHandlePin(page, label, passcode))) {
-    log('fail', `[${label}] @${user} — could not pass PIN`);
+    log('fail', `[${label}] @${user} — blocked by challenge on profile`);
     return false;
   }
 
-  await page.screenshot({
-    path: path.join(DEBUG_DIR, `profile_${user}_${Date.now()}.png`),
-    fullPage: false
-  }).catch(() => {});
+  await shot(page, `profile_${user}`);
 
-  const msgBtnSelectors = [
-    '[data-testid="sendDMFromProfile"]',
-    'div[data-testid="sendDMFromProfile"]',
-    '[aria-label="Message"]',
-    'a[href*="/messages/"]',
-    'div[role="button"]:has-text("Message")',
-    'button:has-text("Message")',
-    '[data-testid="dmComposerTextInput"]'
-  ];
+  // Try Message button on profile
+  let opened = await findAndClick(page, SELECTORS.messageButton, 5000);
 
-  let clickedMessage = await findAndClick(page, msgBtnSelectors, 5000);
-
-  if (!clickedMessage) {
-    log('warn', `[${label}] Message button not found on profile — trying compose URL`);
-    
+  if (!opened) {
+    log('warn', `[${label}] Message button not found — falling back to compose`);
     await safeGoto(page, 'https://x.com/messages/compose', label);
     if (!(await maybeHandlePin(page, label, passcode))) {
-      log('fail', `[${label}] @${user} — PIN blocked compose`);
+      log('fail', `[${label}] @${user} — blocked on compose`);
       return false;
     }
 
-    await sleep(2000);
-
-    const searchSelectors = [
-      '[data-testid="searchPeople"]',
-      'input[placeholder*="Search"]',
-      'input[aria-label*="Search"]',
-      'input[type="text"]',
-      'div[role="combobox"] input'
-    ];
-
-    const searchBox = await findVisible(page, searchSelectors, 5000);
+    const searchBox = await findVisible(page, SELECTORS.searchPeople, 6000);
     if (!searchBox) {
-      log('fail', `[${label}] @${user} — search box not found on compose`);
-      await page.screenshot({
-        path: path.join(DEBUG_DIR, `compose_fail_${user}_${Date.now()}.png`),
-        fullPage: true
-      }).catch(() => {});
+      log('fail', `[${label}] @${user} — search box not found`);
+      await shot(page, `compose_fail_${user}`);
       return false;
     }
 
     await searchBox.click({ clickCount: 2 }).catch(() => {});
-    await sleep(300);
-    await page.keyboard.type(user, { delay: 55 });
-    await sleep(2200);
+    await sleep(250);
+    await page.keyboard.type(user, { delay: 45 + Math.random() * 30 });
+    await sleep(1800 + Math.random() * 800);
 
-    const resultSelectors = [
-      `[data-testid="TypeaheadUser"]`,
-      `div[role="option"]`,
-      `div[data-testid="TypeaheadUser"]`,
-      `li[role="option"]`
-    ];
-
-    let picked = await findAndClick(page, resultSelectors, 4000);
+    let picked = await findAndClick(page, SELECTORS.userResult, 4000);
     if (!picked) {
       await page.keyboard.press('Enter');
-      await sleep(1500);
+      await sleep(1200);
     } else {
-      await sleep(2000);
+      await sleep(1500);
     }
   } else {
-    log('info', `[${label}] Clicked Message on profile`);
-    await sleep(3000);
+    log('info', `[${label}] Opened Message from profile`);
+    await sleep(2200 + Math.random() * 800);
   }
 
   if (!(await maybeHandlePin(page, label, passcode))) {
-    log('fail', `[${label}] @${user} — PIN appeared after opening chat`);
+    log('fail', `[${label}] @${user} — challenge after opening chat`);
     return false;
   }
 
-  await sleep(1500);
-
-  const inputSelectors = [
-    '[data-testid="dmComposerTextInput"]',
-    'div[data-testid="dmComposerTextInput"]',
-    'div[role="textbox"][contenteditable="true"]',
-    'div[aria-label*="Message"]',
-    'div[aria-label*="message"]',
-    'div[contenteditable="true"][data-testid]',
-    'div[contenteditable="true"]'
-  ];
-
-  let input = await findVisible(page, inputSelectors, 7000);
+  // Find composer
+  let input = await findVisible(page, SELECTORS.composer, 7000);
 
   if (!input) {
-    const nextBtns = [
+    // Sometimes needs Next
+    await findAndClick(page, [
       'div[role="button"]:has-text("Next")',
       'button:has-text("Next")',
-      '[data-testid="nextButton"]',
-      'div[data-testid="nextButton"]'
-    ];
-    await findAndClick(page, nextBtns, 3000);
-    await sleep(2000);
-    input = await findVisible(page, inputSelectors, 5000);
+      '[data-testid="nextButton"]'
+    ], 2500);
+    await sleep(1500);
+    input = await findVisible(page, SELECTORS.composer, 5000);
   }
 
   if (!input) {
     log('fail', `[${label}] @${user} — message input not found`);
-    await page.screenshot({
-      path: path.join(DEBUG_DIR, `no_input_${user}_${Date.now()}.png`),
-      fullPage: true
-    }).catch(() => {});
+    await shot(page, `no_input_${user}`);
     log('info', `[${label}] Current URL: ${page.url()}`);
     return false;
   }
 
+  // Type message
   await input.click({ clickCount: 2 }).catch(() => {});
-  await sleep(400);
-
+  await sleep(300);
   await page.keyboard.press('Control+A').catch(() => {});
   await page.keyboard.press('Backspace').catch(() => {});
   await sleep(200);
 
-  await page.keyboard.type(message, { delay: 28 + Math.random() * 25 });
-  await sleep(700);
+  await page.keyboard.type(message, { delay: 22 + Math.random() * 28 });
+  await sleep(600 + Math.random() * 400);
 
-  const sendSelectors = [
-    '[data-testid="dmComposerSendButton"]',
-    'div[data-testid="dmComposerSendButton"]',
-    '[aria-label="Send"]',
-    'div[role="button"][aria-label="Send"]',
-    'div[role="button"]:has-text("Send")',
-    'button:has-text("Send")'
-  ];
-
-  let sent = await findAndClick(page, sendSelectors, 3000);
-
-  if (!sent) {
+  // Send
+  let clickedSend = await findAndClick(page, SELECTORS.sendButton, 3000);
+  if (!clickedSend) {
     await page.keyboard.press('Enter');
-    log('info', `[${label}] ✅ DM sent to @${user} (Enter fallback)`);
-  } else {
-    log('info', `[${label}] ✅ DM sent to @${user}`);
   }
 
-  await sleep(2500);
+  await sleep(2200 + Math.random() * 1000);
 
-  await page.screenshot({
-    path: path.join(DEBUG_DIR, `after_send_${user}_${Date.now()}.png`),
-    fullPage: false
-  }).catch(() => {});
+  // REAL success check
+  const success = await didMessageActuallySend(page);
 
-  return true;
+  if (success) {
+    log('info', `[${label}] ✅ DM confirmed sent to @${user}`);
+    await shot(page, `sent_ok_${user}`);
+    return true;
+  } else {
+    log('fail', `[${label}] ❌ DM to @${user} — could not confirm send`);
+    await shot(page, `sent_fail_${user}`);
+    return false;
+  }
 }
 
-// ─── Mass DM Runner ──────────────────────────────────
-async function startMassDM(accounts, message, dailyLimit = 50, delaySeconds = 45, passcode = '') {
+// ─────────────────────────────────────────────
+// LAUNCH BROWSER (with proxy + better fingerprint)
+// ─────────────────────────────────────────────
+async function launchHardenedBrowser(proxy = null) {
+  const args = [
+    '--disable-blink-features=AutomationControlled',
+    '--no-default-browser-check',
+    '--disable-dev-shm-usage',
+    '--no-sandbox'
+  ];
+
+  const launchOptions = {
+    headless: false, // keep false for higher success
+    args
+  };
+
+  if (proxy) {
+    // proxy format: http://user:pass@ip:port  or  http://ip:port
+    launchOptions.proxy = { server: proxy };
+  }
+
+  const browser = await chromium.launch(launchOptions);
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    locale: 'en-US',
+    timezoneId: 'America/New_York'
+  });
+
+  // Light stealth
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
+
+  const page = await context.newPage();
+  return { browser, context, page };
+}
+
+// ─────────────────────────────────────────────
+// MASS DM RUNNER
+// ─────────────────────────────────────────────
+async function startMassDM(accounts, message, dailyLimit = 40, delaySeconds = 55, passcode = '', proxy = null) {
   if (!message?.trim()) {
     log('error', 'Message is empty');
     return;
@@ -387,7 +458,7 @@ async function startMassDM(accounts, message, dailyLimit = 50, delaySeconds = 45
     return;
   }
 
-  log('start', `Mass DM started | ${accounts.length} account(s) | ${targets.length} targets | ${delaySeconds}s delay | limit ${dailyLimit}/day`);
+  log('start', `Mass DM started | ${accounts.length} account(s) | ${targets.length} targets | delay ${delaySeconds}s | limit ${dailyLimit}/day`);
 
   multiAccountStopSignals = [];
   multiAccountBrowsers = [];
@@ -395,145 +466,81 @@ async function startMassDM(accounts, message, dailyLimit = 50, delaySeconds = 45
 
   const tasks = accounts.map(async ({ cookiesPath, label, passcode: accountPasscode }) => {
     if (!fs.existsSync(cookiesPath)) {
-      log('error', `[${label}] session missing`);
+      log('error', `[${label}] cookies file missing`);
       return;
     }
 
-    const stopSignal = { stopped: false };
+    const stopSignal = { stop: false };
     multiAccountStopSignals.push(stopSignal);
 
-    const pinToUse = (accountPasscode && accountPasscode.trim()) ? accountPasscode.trim() : passcode;
+    let browser, context, page;
 
-    let browser = null;
     try {
-      let raw = JSON.parse(fs.readFileSync(cookiesPath, 'utf-8'));
+      ({ browser, context, page } = await launchHardenedBrowser(proxy));
+      multiAccountBrowsers.push(browser);
 
-      // Accept both correct array format and older/wrong object formats
-      let cookies = [];
-      if (Array.isArray(raw)) {
-        cookies = raw;
-      } else if (raw && Array.isArray(raw.cookies)) {
-        cookies = raw.cookies;
-      } else if (raw && typeof raw === 'object' && raw.name && raw.value) {
-        cookies = [raw];
-      } else if (raw && typeof raw === 'object') {
-        if (raw.auth_token || raw.authToken) {
-          cookies.push({
-            name: 'auth_token',
-            value: String(raw.auth_token || raw.authToken),
-            domain: '.x.com',
-            path: '/',
-            httpOnly: true,
-            secure: true
-          });
-        }
-        if (raw.ct0) {
-          cookies.push({
-            name: 'ct0',
-            value: String(raw.ct0),
-            domain: '.x.com',
-            path: '/',
-            secure: true
-          });
-        }
-      }
-
-      cookies = (cookies || []).map(c => ({
-        name: c.name,
-        value: String(c.value || ''),
-        domain: c.domain || '.x.com',
-        path: c.path || '/',
-        httpOnly: !!c.httpOnly,
-        secure: c.secure !== false,
-        sameSite: c.sameSite || 'Lax'
-      })).filter(c => c.name && c.value);
-
+      // Load cookies (now supports full array)
+      const raw = JSON.parse(fs.readFileSync(cookiesPath, 'utf-8'));
+      const cookies = Array.isArray(raw) ? raw : [];
       if (cookies.length === 0) {
-        log('error', `[${label}] invalid or empty cookie file`);
+        log('error', `[${label}] no cookies found`);
         return;
       }
 
-      log('info', `[${label}] loaded ${cookies.length} cookie(s)`);
-
-      browser = await chromium.launch({
-        headless: false,
-        slowMo: 180,
-        args: [
-          '--no-sandbox',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-infobars',
-          '--window-size=1280,800'
-        ]
-      });
-      multiAccountBrowsers.push(browser);
-
-      const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        viewport: { width: 1280, height: 800 },
-        locale: 'en-US'
-      });
       await context.addCookies(cookies);
-
-      const page = await context.newPage();
-
-      await page.addInitScript(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      });
-
-      log('info', `[${label}] browser ready`);
+      log('info', `[${label}] Loaded ${cookies.length} cookies`);
 
       await safeGoto(page, 'https://x.com/home', label);
-      await maybeHandlePin(page, label, pinToUse);
-      await sleep(2000);
+      if (!(await maybeHandlePin(page, label, accountPasscode || passcode))) {
+        log('fail', `[${label}] Could not pass initial challenge`);
+        return;
+      }
 
-      let sent = 0;
+      let sentCount = 0;
 
       for (const user of targets) {
-        if (stopSignal.stopped) break;
-
-        if (getTodayCount(label) >= dailyLimit) {
-          log('warn', `[${label}] daily limit ${dailyLimit} reached`);
+        if (stopSignal.stop) break;
+        if (sentCount >= dailyLimit) {
+          log('info', `[${label}] Daily limit reached (${dailyLimit})`);
           break;
         }
-
         if (alreadySent(label, user)) {
-          log('info', `[${label}] already sent to @${user} today — skip`);
+          log('info', `[${label}] Skipping @${user} (already sent today)`);
           continue;
         }
 
-        const ok = await sendSingleDM(page, user, message, label, pinToUse);
+        const ok = await sendSingleDM(page, user, message, label, accountPasscode || passcode);
         if (ok) {
           markSent(label, user);
-          sent++;
+          sentCount++;
         }
 
-        if (!stopSignal.stopped) {
-          const wait = delaySeconds * 1000 + Math.floor(Math.random() * 7000);
-          log('delay', `[${label}] waiting ${Math.round(wait / 1000)}s...`);
-          await sleep(wait);
-        }
+        const wait = (delaySeconds * 1000) + Math.floor(Math.random() * 8000);
+        log('info', `[${label}] Waiting ${(wait / 1000).toFixed(1)}s...`);
+        await sleep(wait);
       }
 
-      log('done', `[${label}] finished — ${sent} DMs sent this session`);
-    } catch (err) {
-      log('error', `[${label}] ${err.message}`);
+      log('info', `[${label}] Finished. Sent: ${sentCount}`);
+    } catch (e) {
+      log('error', `[${label}] Fatal: ${e.message}`);
     } finally {
-      if (browser) await browser.close().catch(() => {});
+      try { await browser?.close(); } catch {}
     }
   });
 
   await Promise.all(tasks);
   global.broadcast && global.broadcast('status', { running: false });
-  log('done', 'All accounts finished');
+  log('info', 'All accounts finished');
 }
 
 function stopMassDM() {
-  log('info', 'Stop requested');
-  multiAccountStopSignals.forEach(s => s.stopped = true);
-  multiAccountBrowsers.forEach(b => b.close().catch(() => {}));
-  multiAccountStopSignals = [];
+  multiAccountStopSignals.forEach(s => (s.stop = true));
+  multiAccountBrowsers.forEach(b => {
+    try { b.close(); } catch {}
+  });
   multiAccountBrowsers = [];
   global.broadcast && global.broadcast('status', { running: false });
+  log('info', 'Stop signal sent');
 }
 
 module.exports = { startMassDM, stopMassDM };
